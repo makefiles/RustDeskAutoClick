@@ -1,0 +1,17 @@
+{
+  "mode": "whitelist",
+  "allowed_ids": ["YOUR_RUSTDESK_ID_HERE"],
+  "dialog_size": {
+    "width": 300,
+    "height": 490,
+    "tolerance": 50
+  },
+  "button_position": {
+    "x_ratio": 0.25,
+    "y_ratio": 0.95
+  },
+  "click_delay": 0.5,
+  "idle_threshold": 1.0,
+  "idle_timeout": 30.0,
+  "log_file": "./autoclick.log"
+}
