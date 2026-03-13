@@ -114,11 +114,15 @@ def setup_logger(log_file: Path) -> logging.Logger:
 class BaseDetector(ABC):
     """Platform-agnostic interface for window detection and click."""
 
+    PEER_COOLDOWN = 10.0  # seconds to ignore same peer after successful accept
+
     def __init__(self, config: Config, logger: logging.Logger) -> None:
         self.config = config
         self.logger = logger
         # Cache of window IDs already processed to prevent duplicate clicks
         self._processed: set = set()
+        # Track recently accepted peers: peer_id -> timestamp
+        self._accepted_peers: dict = {}
 
     @abstractmethod
     def run(self) -> None:
@@ -201,7 +205,9 @@ class BaseDetector(ABC):
 
         # Title may not be set yet (Flutter sets it asynchronously).
         # Retry a few times to get the peer ID from the title.
-        if peer_id is None and self.config.mode == "whitelist":
+        # This is needed for ALL modes — title verification ensures we only
+        # click actual connection request dialogs, not status windows.
+        if peer_id is None:
             for attempt in range(self.TITLE_RETRY_MAX):
                 time.sleep(self.TITLE_RETRY_INTERVAL)
                 title = self._get_window_title_by_id(window_id)
@@ -211,8 +217,22 @@ class BaseDetector(ABC):
                 self.logger.debug("Title retry %d/%d: title=%r",
                                   attempt + 1, self.TITLE_RETRY_MAX, title)
 
+        # Title must match connection request pattern (ID@hostname).
+        # This prevents clicking on connection status windows or other RustDesk windows.
+        if peer_id is None:
+            self.logger.info("SKIPPED wid=%s — not a connection request (title=%r)", window_id, title)
+            self._processed.add(window_id)
+            return
+
         if not self._should_accept(peer_id):
             self.logger.info("REJECTED peer=%s (not in whitelist) title=%r", peer_id, title)
+            self._processed.add(window_id)
+            return
+
+        # Skip if this peer was recently accepted (prevents clicking status popup)
+        last_accepted = self._accepted_peers.get(peer_id, 0.0)
+        if time.monotonic() - last_accepted < self.PEER_COOLDOWN:
+            self.logger.info("SKIPPED peer=%s — recently accepted, ignoring status window", peer_id)
             self._processed.add(window_id)
             return
 
@@ -220,25 +240,14 @@ class BaseDetector(ABC):
 
         self._wait_for_idle()
         time.sleep(self.config.click_delay)
-        success = self._click_accept(window_id)
-        if success:
-            # Verify the dialog actually closed after clicking
-            time.sleep(1.0)
-            if self._is_window_still_open(window_id):
-                self.logger.warning("Dialog still open after click — will retry on next scan")
-            else:
-                self._processed.add(window_id)
-                self.logger.info("Dialog closed successfully for %s", window_id)
-        else:
-            self.logger.warning("Click failed for %s — will retry on next scan", window_id)
+        self._click_accept(window_id)
+        self._processed.add(window_id)
+        self._accepted_peers[peer_id] = time.monotonic()
 
-    def _is_window_still_open(self, window_id) -> bool:
-        """Check if the window still exists. Override in subclass."""
-        return False
 
     @abstractmethod
-    def _click_accept(self, window_id) -> bool:
-        """Click the accept button in the given window. Returns True on success."""
+    def _click_accept(self, window_id) -> None:
+        """Click the accept button in the given window."""
 
 
 # ---------------------------------------------------------------------------
@@ -299,16 +308,6 @@ class LinuxDetector(BaseDetector):
             return result.stdout.strip()
         except Exception:
             return ""
-
-    def _is_window_still_open(self, window_id) -> bool:
-        try:
-            result = subprocess.run(
-                ["xdotool", "getwindowname", str(window_id)],
-                capture_output=True, text=True
-            )
-            return result.returncode == 0 and result.stdout.strip() != ""
-        except Exception:
-            return False
 
     def __init__(self, config: Config, logger: logging.Logger) -> None:
         super().__init__(config, logger)
@@ -377,17 +376,16 @@ class LinuxDetector(BaseDetector):
         except Exception:
             return 0, 0
 
-    def _click_accept(self, window_id) -> bool:
+    def _click_accept(self, window_id) -> None:
         """
         Click the accept button using xdotool absolute coordinates.
         Saves and restores mouse position to minimize disruption.
-        Returns True on success.
         """
         try:
             geom = self._get_window_geometry(window_id)
             if geom is None:
                 self.logger.warning("Could not get geometry for window 0x%x", window_id)
-                return False
+                return
 
             abs_x, abs_y, width, height = geom
             btn_x = abs_x + int(width * self.config.x_ratio)
@@ -408,10 +406,8 @@ class LinuxDetector(BaseDetector):
             self.logger.info(
                 "Clicked accept button at (%d, %d) for window 0x%x", btn_x, btn_y, window_id
             )
-            return True
         except Exception as e:
             self.logger.error("Click failed for window 0x%x: %s", window_id, e)
-            return False
 
     SCAN_INTERVAL = 2  # seconds between fallback scans
 
@@ -585,9 +581,6 @@ class WindowsDetector(BaseDetector):
     def _get_window_title_by_id(self, window_id) -> str:
         return self._get_window_title(window_id)
 
-    def _is_window_still_open(self, window_id) -> bool:
-        return bool(self._user32.IsWindow(window_id))
-
     def _get_window_rect(self, hwnd) -> Optional[tuple[int, int, int, int]]:
         ctypes = self._ctypes
         rect = ctypes.wintypes.RECT()
@@ -601,14 +594,14 @@ class WindowsDetector(BaseDetector):
         self._user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
 
-    def _click_accept(self, hwnd) -> bool:
+    def _click_accept(self, hwnd) -> None:
         ctypes = self._ctypes
         user32 = self._user32
 
         rect = self._get_window_rect(hwnd)
         if rect is None:
             self.logger.warning("Could not get rect for hwnd %s", hwnd)
-            return False
+            return
 
         x, y, width, height = rect
         self.logger.info(
@@ -662,7 +655,6 @@ class WindowsDetector(BaseDetector):
         user32.mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, saved_norm_x, saved_norm_y, 0, 0)
 
         self.logger.info("Clicked accept button at (%d, %d) for hwnd %s", btn_x, btn_y, hwnd)
-        return True
 
     SCAN_INTERVAL = 2  # seconds between fallback scans
 
