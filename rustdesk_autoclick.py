@@ -541,6 +541,23 @@ class LinuxDetector(BaseDetector):
         if not self._is_dialog_size(w, h):
             return
 
+        # Only consider rustdesk-owned windows, matching the fallback scan's
+        # --class rustdesk filter. Fail open: if the search errors or returns
+        # nothing, fall through to the title check (the real gate) rather than
+        # dropping a possibly-real dialog.
+        try:
+            res = subprocess.run(
+                ["xdotool", "search", "--class", "rustdesk"],
+                capture_output=True, text=True
+            )
+            rd_ids = {int(x) for x in res.stdout.split() if x.strip().isdigit()}
+            if rd_ids and win_id not in rd_ids:
+                self.logger.debug("Ignoring non-rustdesk window wid=%d size=(%d,%d)",
+                                  win_id, w, h)
+                return
+        except Exception:
+            pass
+
         # Get title for peer ID extraction (best effort)
         title = ""
         try:
