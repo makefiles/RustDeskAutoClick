@@ -58,7 +58,10 @@ class Config:
             print(f"ERROR: mode must be one of {self.VALID_MODES}", file=sys.stderr)
             sys.exit(1)
 
-        self.allowed_ids: set[str] = set(str(i) for i in data.get("allowed_ids", []))
+        # Keep digits only so a pasted "165 623 879" from the RustDesk UI still matches
+        self.allowed_ids: set[str] = set(
+            re.sub(r"\D", "", str(i)) for i in data.get("allowed_ids", [])
+        )
 
         bp = data.get("button_position", {})
         self.x_ratio: float = float(bp.get("x_ratio", 0.25))
@@ -437,7 +440,7 @@ class LinuxDetector(BaseDetector):
                 _, _, w, h = geom
                 if self._is_dialog_size(w, h):
                     current_ids.add(win_id)
-                    candidates.append(win_id)
+                    candidates.append((win_id, w, h))
 
             # Purge stale entries: if a window was destroyed, its ID can be
             # reused by X11 for a new window. Remove gone IDs from cache.
@@ -445,7 +448,7 @@ class LinuxDetector(BaseDetector):
             if stale:
                 self._processed -= stale
 
-            for win_id in candidates:
+            for win_id, w, h in candidates:
                 if win_id in self._processed:
                     continue
 

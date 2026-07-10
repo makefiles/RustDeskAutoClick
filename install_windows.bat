@@ -20,7 +20,13 @@ if not exist "%SCRIPT_PATH%" (
 )
 
 if not exist "%SCRIPT_DIR%config.json" (
-    echo ERROR: config.json not found at %SCRIPT_DIR%config.json
+    if exist "%SCRIPT_DIR%config.example.json" (
+        copy "%SCRIPT_DIR%config.example.json" "%SCRIPT_DIR%config.json" >nul
+        echo Created config.json at %SCRIPT_DIR%config.json
+        echo Edit allowed_ids with your RustDesk ID, then run this installer again.
+    ) else (
+        echo ERROR: config.json / config.example.json not found in %SCRIPT_DIR%
+    )
     pause
     exit /b 1
 )

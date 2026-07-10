@@ -8,13 +8,21 @@ RustDesk 유료 기능인 자동 수락을 무료로 구현합니다. Linux와 W
 
 ### 1. config.json 설정
 
+먼저 예시 파일을 복사합니다:
+
+```bash
+cp config.example.json config.json      # Windows: copy config.example.json config.json
+```
+
+그다음 `config.json`을 편집합니다. 모든 연결을 자동 수락하려면:
+
 ```json
 {
   "mode": "allow_all"
 }
 ```
 
-모든 연결을 자동 수락합니다. 특정 PC만 허용하려면:
+특정 PC만 허용하려면:
 
 ```json
 {
@@ -23,7 +31,9 @@ RustDesk 유료 기능인 자동 수락을 무료로 구현합니다. Linux와 W
 }
 ```
 
-`allowed_ids`에 허용할 RustDesk ID를 넣으세요. (RustDesk 메인 화면 상단의 숫자)
+`allowed_ids`에 허용할 RustDesk ID를 넣으세요. (RustDesk 메인 화면 상단의 숫자, 공백 없이 숫자만)
+
+> `config.json`은 개인 ID가 들어가므로 `.gitignore`에 등록되어 버전 관리에서 제외됩니다. 템플릿은 `config.example.json`을 사용하세요.
 
 ### 2. 실행
 

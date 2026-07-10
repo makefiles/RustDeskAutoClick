@@ -21,3 +21,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local config (personal RustDesk IDs) — copy config.example.json to config.json
+config.json
+
+# Screenshots (may contain personal RustDesk ID/account)
+*.png

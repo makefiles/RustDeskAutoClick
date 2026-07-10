@@ -12,8 +12,7 @@ if errorlevel 1 (
 set TASK_NAME=RustDeskAutoAccept
 
 echo Stopping running instances...
-taskkill /f /im pythonw.exe >nul 2>&1
-taskkill /f /im python.exe >nul 2>&1
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*rustdesk_autoclick.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 
 echo Removing scheduled task...
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>&1

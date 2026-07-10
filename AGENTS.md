@@ -24,14 +24,14 @@ Config is loaded from `config.json` in the same directory as the script.
 - **Primary:** OS event (X11 MapNotify / Windows EVENT_OBJECT_SHOW) for instant detection
 - **Fallback:** Periodic scan every 2 seconds to catch missed events
 
-**Peer ID extraction:** Title regex `^(\d+)@` is used only for whitelist filtering (best effort). Title may load asynchronously (Flutter), so there's a retry loop (up to 5s) in whitelist mode.
+**Peer ID extraction:** Title regex `^(\d+)@` extracts the peer ID for whitelist filtering. Title may load asynchronously (Flutter), so there's a retry loop (up to 5s) in **all** modes — a valid `ID@host` title also confirms the window is a real connection request, not a status window.
 
 ## Click Mechanism
 
 1. Wait for mouse idle (configurable threshold)
 2. Save current mouse position
 3. Activate window → move mouse to button coordinates → click → restore mouse
-4. Verify dialog closed; if still open, retry on next scan cycle
+4. Each dialog is clicked once (marked processed); a recently-accepted peer is ignored via cooldown so its connection-status window is not clicked
 
 **Linux:** xdotool absolute coordinates (Flutter ignores synthetic X events)
 **Windows:** mouse_event with MOUSEEVENTF_ABSOLUTE (normalized 0-65535 range for multi-monitor)

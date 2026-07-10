@@ -15,14 +15,25 @@ if [ ! -f "$SCRIPT_PATH" ]; then
 fi
 
 if [ ! -f "${SCRIPT_DIR}/config.json" ]; then
-    echo "ERROR: config.json not found at ${SCRIPT_DIR}/config.json"
+    if [ -f "${SCRIPT_DIR}/config.example.json" ]; then
+        cp "${SCRIPT_DIR}/config.example.json" "${SCRIPT_DIR}/config.json"
+        echo "Created config.json at ${SCRIPT_DIR}/config.json"
+        echo "Edit allowed_ids with your RustDesk ID, then run this installer again."
+    else
+        echo "ERROR: config.json / config.example.json not found in ${SCRIPT_DIR}"
+    fi
     exit 1
 fi
 
-# Check python-xlib
-if ! python3 -c "import Xlib" 2>/dev/null; then
+# Check python-xlib against the interpreter the service will actually run (/usr/bin/python3)
+if ! /usr/bin/python3 -c "import Xlib" 2>/dev/null; then
     echo "Installing python-xlib..."
-    python3 -m pip install --user python-xlib
+    if ! /usr/bin/python3 -m pip install --user python-xlib; then
+        echo "ERROR: failed to auto-install python-xlib."
+        echo "  sudo apt install python3-xlib   # Debian/Ubuntu"
+        echo "Install it manually, then run this installer again."
+        exit 1
+    fi
 fi
 
 # Check xdotool
