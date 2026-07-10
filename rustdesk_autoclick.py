@@ -763,16 +763,34 @@ class WindowsDetector(BaseDetector):
         user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
         return found
 
+    def _window_exists(self, hwnd) -> bool:
+        """Whether the window still exists. IsWindow() is authoritative.
+
+        `_find_rustdesk_windows` returns only dialog-sized windows, so a handled
+        window that is momentarily not dialog-sized (e.g. the connection-manager
+        panel while it shows an active session) is absent from the scan without
+        being gone. We must confirm it is really destroyed before purging it
+        from the cache, or it gets re-accepted — the click landing on the
+        panel's disconnect button and dropping the live session.
+        """
+        try:
+            return bool(self._user32.IsWindow(hwnd))
+        except Exception:
+            # Uncertain — assume alive so we don't re-accept.
+            return True
+
     def _scan_windows(self) -> None:
         """Scan for RustDesk dialogs by process + size (fallback for missed events)."""
         try:
             found = self._find_rustdesk_windows()
             current_hwnds = set(hwnd for hwnd, _, _, _ in found)
 
-            # Purge stale entries (window destroyed, hwnd may be reused)
+            # Purge cache entries only for windows that no longer EXIST, not for
+            # windows merely missing from this scan (see _window_exists).
             stale = self._processed - current_hwnds
-            if stale:
-                self._processed -= stale
+            really_gone = {h for h in stale if not self._window_exists(h)}
+            if really_gone:
+                self._processed -= really_gone
 
             for hwnd, title, w, h in found:
                 if hwnd in self._processed:
