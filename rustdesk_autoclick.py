@@ -362,6 +362,28 @@ class LinuxDetector(BaseDetector):
             pass
         return None
 
+    def _window_exists(self, win_id: int) -> bool:
+        """Reliably check whether a window still exists, via Xlib.
+
+        `xdotool search --class rustdesk` is flaky: it intermittently returns
+        an empty or partial list even while the windows are still alive
+        (confirmed — xwininfo reports the CM panel IsViewable at the very
+        instant the search returns nothing). We must never purge a live window
+        from the processed cache on the strength of that search alone, or the
+        persistent connection-manager panel gets re-accepted every time the
+        search flickers. A direct GetWindowAttributes round-trip raises
+        BadWindow only when the window is genuinely gone.
+        """
+        try:
+            win = self._dpy.create_resource_object("window", win_id)
+            win.get_attributes()
+            return True
+        except self._xerror.BadWindow:
+            return False
+        except Exception:
+            # Uncertain (transient X error) — assume alive so we don't re-accept.
+            return True
+
     def _get_mouse_position(self) -> tuple[int, int]:
         """Return current mouse position."""
         try:
@@ -422,7 +444,7 @@ class LinuxDetector(BaseDetector):
                 ["xdotool", "search", "--class", "rustdesk"],
                 capture_output=True, text=True
             )
-            current_ids = set()
+            all_ids = set()
             candidates = []
             for line in result.stdout.strip().splitlines():
                 line = line.strip()
@@ -432,6 +454,7 @@ class LinuxDetector(BaseDetector):
                     win_id = int(line)
                 except ValueError:
                     continue
+                all_ids.add(win_id)
 
                 # Check window size to filter connection dialogs
                 geom = self._get_window_geometry(win_id)
@@ -439,14 +462,21 @@ class LinuxDetector(BaseDetector):
                     continue
                 _, _, w, h = geom
                 if self._is_dialog_size(w, h):
-                    current_ids.add(win_id)
                     candidates.append((win_id, w, h))
 
-            # Purge stale entries: if a window was destroyed, its ID can be
-            # reused by X11 for a new window. Remove gone IDs from cache.
-            stale = self._processed - current_ids
-            if stale:
-                self._processed -= stale
+            # Purge cache entries only for windows that no longer EXIST.
+            # A window we've already handled (e.g. the persistent RustDesk
+            # connection-manager panel) must stay cached for its whole lifetime,
+            # or it gets re-accepted. We must NOT purge just because a window is
+            # missing from this scan: `xdotool search --class rustdesk` flakily
+            # returns empty/partial results while the windows are still alive,
+            # so every candidate for purging is re-checked with Xlib and dropped
+            # only when it is genuinely gone. Skip the search-empty case cheaply.
+            if all_ids:
+                stale = self._processed - all_ids
+                really_gone = {wid for wid in stale if not self._window_exists(wid)}
+                if really_gone:
+                    self._processed -= really_gone
 
             for win_id, w, h in candidates:
                 if win_id in self._processed:
